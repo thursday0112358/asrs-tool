@@ -93,6 +93,16 @@ input[type=range]::-moz-range-thumb{width:13px;height:13px;border-radius:50%;bac
 .critical{color:var(--red)}
 .formula-note{font-size:10px;color:rgba(100,100,120,0.5);padding:8px 12px;background:var(--bg3);border-top:1px solid var(--border);font-style:italic}
 .footnote{font-size:10px;color:rgba(100,100,120,0.45);margin-top:2rem;padding-top:1rem;border-top:1px solid var(--border);line-height:1.8}
+.trendcard{background:var(--bg2);border:1px solid var(--border);padding:1.25rem;margin-bottom:1.75rem}
+.trendgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:.875rem;margin-top:.75rem}
+.tmetric{border:1px solid var(--border);padding:.875rem .75rem}
+.tmetric .tlbl{font-size:10px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:.4rem}
+.tmetric .trow{display:flex;align-items:baseline;justify-content:space-between}
+.tmetric .tval{font-size:19px;font-weight:500}
+.tmetric .tunit{font-size:10px;color:var(--muted)}
+.tmetric .tdelta{font-size:11px;font-weight:500;margin-top:3px}
+.tmetric .tcanvas-wrap{margin-top:.625rem;height:52px;position:relative}
+.trend-summary{font-size:11px;color:var(--muted);margin-top:.875rem;padding-top:.75rem;border-top:1px solid var(--border);line-height:1.6}
 </style>
 </head>
 <body>
@@ -140,6 +150,12 @@ input[type=range]::-moz-range-thumb{width:13px;height:13px;border-radius:50%;bac
 
 <div class="interp" id="interp" style="border-left-color:var(--border2)">
   <p id="interptext">Enter observed data values below. Each metric maps to a score of 1–10 using predefined thresholds. The algorithm computes module scores and the composite ASRS automatically. Highlighted band shows which scoring bracket the entered value falls into.</p>
+</div>
+
+<div class="trendcard" id="trend-section" style="display:none">
+  <div class="sec">live data — weekly trend <span id="trend-weeks" style="font-size:9px;color:rgba(100,100,120,0.45);letter-spacing:0;text-transform:none;margin-left:4px"></span></div>
+  <div class="trendgrid" id="trend-grid"></div>
+  <div class="trend-summary" id="trend-summary"></div>
 </div>
 
 <div class="mods" id="mod-container"></div>
@@ -627,6 +643,108 @@ radarChart = new Chart(rctx, {
 
 render();
 
+// ── Trend config ────────────────────────────────────────────────────────────
+// pressureUp: true  → rising value = more risk
+// pressureUp: false → falling value = more risk (consumer confidence)
+const TREND_METRICS = [
+  { key:'treasury_yield_10y',   label:'10-Yr Treasury',     unit:'%',   pressureUp:true  },
+  { key:'consumer_confidence',  label:'Consumer Confidence', unit:'',    pressureUp:false },
+  { key:'ig_credit_spread_bps', label:'IG Credit Spread',   unit:' bps', pressureUp:true  },
+  { key:'median_ps_ratio',      label:'Median AI P/S',      unit:'x',   pressureUp:true  },
+];
+
+function renderTrends(history) {
+  if (history.length < 2) return;
+
+  const section  = document.getElementById('trend-section');
+  const grid     = document.getElementById('trend-grid');
+  const summary  = document.getElementById('trend-summary');
+  const weeksEl  = document.getElementById('trend-weeks');
+  grid.innerHTML = '';
+  section.style.display = '';
+
+  weeksEl.textContent = `(${history.length} week${history.length === 1 ? '' : 's'})`;
+
+  const COL_BUILDING = '#b91c1c';
+  const COL_EASING   = '#16a34a';
+  const COL_FLAT     = '#686878';
+
+  let buildingCount = 0;
+
+  TREND_METRICS.forEach((cfg, i) => {
+    const series = history.map(h => h[cfg.key]).filter(v => v != null);
+    if (series.length < 2) return;
+
+    const current  = series[series.length - 1];
+    const compare  = series[Math.max(0, series.length - 5)]; // ~4 weeks back
+    const delta    = current - compare;
+    const building = cfg.pressureUp ? delta > 0.001 : delta < -0.001;
+    const easing   = cfg.pressureUp ? delta < -0.001 : delta > 0.001;
+    if (building) buildingCount++;
+
+    const deltaColor = building ? COL_BUILDING : easing ? COL_EASING : COL_FLAT;
+    const deltaSign  = delta > 0 ? '+' : '';
+    const deltaFmt   = Math.abs(delta) < 0.05
+      ? `${deltaSign}${delta.toFixed(2)}`
+      : `${deltaSign}${delta.toFixed(1)}`;
+    const arrow = building ? '▲' : easing ? '▼' : '—';
+    const lineColor = building ? COL_BUILDING : easing ? COL_EASING : COL_FLAT;
+
+    const tile = document.createElement('div');
+    tile.className = 'tmetric';
+    tile.innerHTML = `
+      <div class="tlbl">${cfg.label}</div>
+      <div class="trow">
+        <span class="tval">${current}</span>
+        <span class="tunit">${cfg.unit}</span>
+      </div>
+      <div class="tdelta" style="color:${deltaColor}">${arrow} ${deltaFmt}${cfg.unit} vs 4 wks</div>
+      <div class="tcanvas-wrap"><canvas id="tcanvas-${i}"></canvas></div>`;
+    grid.appendChild(tile);
+
+    // Sparkline
+    new Chart(document.getElementById(`tcanvas-${i}`), {
+      type: 'line',
+      data: {
+        labels: series.map((_, j) => j),
+        datasets: [{
+          data: series,
+          borderColor: lineColor,
+          borderWidth: 1.5,
+          pointRadius: 0,
+          tension: 0.3,
+          fill: true,
+          backgroundColor: lineColor.replace(')', ',0.06)').replace('rgb', 'rgba'),
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+        scales: {
+          x: { display: false },
+          y: { display: false }
+        }
+      }
+    });
+  });
+
+  // Summary sentence
+  const total   = TREND_METRICS.length;
+  const easeCount = total - buildingCount;
+  let msg, col;
+  if (buildingCount >= 3) {
+    msg = `<strong style="color:${COL_BUILDING}">${buildingCount} of ${total} indicators trending toward higher risk.</strong> Pressure is building across most tracked signals.`;
+  } else if (buildingCount === 2) {
+    msg = `<strong>${buildingCount} of ${total} indicators trending toward higher risk.</strong> Mixed signals — monitor closely.`;
+  } else {
+    msg = `<strong style="color:${COL_EASING}">${buildingCount} of ${total} indicators trending toward higher risk.</strong> Pressure is easing across most tracked signals.`;
+  }
+  summary.innerHTML = msg + ' <span style="color:rgba(100,100,120,0.45)">· auto-fetched metrics only (FRED + Massive)</span>';
+}
+
+// ── Live data loader ─────────────────────────────────────────────────────────
 async function loadLiveData() {
   try {
     const resp = await fetch('data/asrs_data.json');
@@ -642,7 +760,7 @@ async function loadLiveData() {
     if (d.macro) {
       const { treasury_yield_10y, consumer_confidence, ig_credit_spread } = d.macro;
       if (treasury_yield_10y?.value != null) set('mti', 'rates', treasury_yield_10y.value);
-      if (consumer_confidence?.value != null)  set('mti', 'cci',   consumer_confidence.value);
+      if (consumer_confidence?.value != null) set('mti', 'cci', consumer_confidence.value);
       if (ig_credit_spread?.value != null) {
         // FRED series is in percent; HTML metric expects basis points
         set('mti', 'cs', Math.round(ig_credit_spread.value * 100));
@@ -664,8 +782,14 @@ async function loadLiveData() {
         'live data as of ' + dt.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'});
     }
   } catch (_) {
-    // no JSON on disk — defaults remain
+    // no asrs_data.json on disk — hardcoded defaults remain
   }
+
+  // Load trend history (independent of current data — fails silently)
+  try {
+    const hr = await fetch('data/asrs_history.json');
+    if (hr.ok) renderTrends(await hr.json());
+  } catch (_) {}
 }
 
 loadLiveData();

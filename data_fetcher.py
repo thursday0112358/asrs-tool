@@ -45,7 +45,9 @@ FRED_SERIES = {
 
 EQUITY_TICKERS = ["NVDA", "MSFT", "GOOGL", "AMZN", "META"]
 
-OUTPUT_PATH = os.path.join(os.path.dirname(__file__), "data", "asrs_data.json")
+OUTPUT_PATH  = os.path.join(os.path.dirname(__file__), "data", "asrs_data.json")
+HISTORY_PATH = os.path.join(os.path.dirname(__file__), "data", "asrs_history.json")
+MAX_HISTORY_WEEKS = 52
 
 # ---------------------------------------------------------------------------
 # FRED
@@ -130,6 +132,47 @@ def fetch_ps_ratio(ticker: str, api_key: str) -> dict:
     }
 
 # ---------------------------------------------------------------------------
+# History
+# ---------------------------------------------------------------------------
+
+def append_to_history(output: dict) -> None:
+    """Append a flat snapshot to asrs_history.json, keeping last MAX_HISTORY_WEEKS entries."""
+    macro    = output.get("macro", {})
+    equities = output.get("equities", {})
+
+    snapshot: dict = {"date": output["fetched_at"][:10]}
+
+    if v := macro.get("treasury_yield_10y", {}).get("value"):
+        snapshot["treasury_yield_10y"] = v
+    if v := macro.get("consumer_confidence", {}).get("value"):
+        snapshot["consumer_confidence"] = v
+    if v := macro.get("ig_credit_spread", {}).get("value"):
+        snapshot["ig_credit_spread_bps"] = round(v * 100, 1)
+
+    ratios = sorted(e["ps_ratio"] for e in equities.values() if e.get("ps_ratio") is not None)
+    if ratios:
+        mid = len(ratios) // 2
+        median = (ratios[mid - 1] + ratios[mid]) / 2 if len(ratios) % 2 == 0 else ratios[mid]
+        snapshot["median_ps_ratio"] = round(median, 1)
+
+    history: list = []
+    if os.path.exists(HISTORY_PATH):
+        with open(HISTORY_PATH) as fh:
+            try:
+                history = json.load(fh)
+            except json.JSONDecodeError:
+                history = []
+
+    history = [h for h in history if h.get("date") != snapshot["date"]]
+    history.append(snapshot)
+    history = history[-MAX_HISTORY_WEEKS:]
+
+    with open(HISTORY_PATH, "w") as fh:
+        json.dump(history, fh, indent=2)
+    print(f"History updated ({len(history)} {'entry' if len(history) == 1 else 'entries'}) → {HISTORY_PATH}")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -178,6 +221,7 @@ def main() -> None:
     with open(OUTPUT_PATH, "w") as fh:
         json.dump(output, fh, indent=2)
     print(f"\nWrote {OUTPUT_PATH}")
+    append_to_history(output)
 
 
 if __name__ == "__main__":
