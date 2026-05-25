@@ -1,0 +1,24 @@
+{
+  "fetched_at": "2026-05-25T00:21:10Z",
+  "macro": {
+    "treasury_yield_10y": {
+      "series_id": "DGS10",
+      "description": "10-Year Treasury Constant Maturity Rate (%)",
+      "date": "2026-05-21",
+      "value": 4.57
+    },
+    "consumer_confidence": {
+      "series_id": "UMCSENT",
+      "description": "University of Michigan Consumer Sentiment Index",
+      "date": "2026-04-01",
+      "value": 49.8
+    },
+    "ig_credit_spread": {
+      "series_id": "BAMLC0A0CM",
+      "description": "ICE BofA US Corporate Index Option-Adjusted Spread (IG, bps)",
+      "date": "2026-05-21",
+      "value": 0.75
+    }
+  },
+  "equities": {}
+}
